@@ -9,7 +9,7 @@ class HabitSerializer(serializers.ModelSerializer):
         read_only_fields = ("user",)
 
     def validate(self, data):
-        # Повторная валидация (на всякий случай)
+        # Повторная валидация
         habit = Habit(**data)
         habit.clean()
         return data
