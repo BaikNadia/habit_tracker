@@ -98,10 +98,63 @@ jobs:
 
       - name: Test Docker image
         run: |
-          docker run --rm -d --name test-container -p 8000:8000 ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          # Сначала проверим, что образ создан и может запуститься
+          echo "=== Testing Docker image ==="
+          
+          # Запускаем контейнер и сразу смотрим логи
+          echo "Starting container..."
+          docker run --name test-container -p 8000:8000 \
+            -e SECRET_KEY=test-key-for-docker \
+            -e DEBUG=True \
+            -e ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0 \
+            -e TELEGRAM_BOT_TOKEN=test-token \
+            -e CELERY_BROKER_URL=redis://redis:6379/0 \
+            -e CELERY_RESULT_BACKEND=redis://redis:6379/0 \
+            -e DB_ENGINE=django.db.backends.sqlite3 \
+            -e DB_NAME=db.sqlite3 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} &
+
+          # Даем контейнеру время на запуск
           sleep 10
-          docker logs test-container
-          docker stop test-container
+          
+          # Проверяем, запущен ли контейнер
+          echo "=== Container status ==="
+          docker ps -a | grep test-container
+          
+          # Смотрим логи контейнера
+          echo "=== Container logs ==="
+          docker logs test-container || echo "Cannot get logs - container may have exited"
+          
+          # Проверяем, отвечает ли приложение
+          echo "=== Testing application response ==="
+          timeout 10 bash -c 'until curl -f http://localhost:8000/ 2>/dev/null; do sleep 1; done' || echo "Application not responding"
+          
+          # Останавливаем контейнер если он еще работает
+          docker stop test-container 2>/dev/null || true
+          docker rm test-container 2>/dev/null || true
+
+      - name: Simple image test
+        run: |
+          # Простая проверка - запускаем контейнер и проверяем, что он не падает мгновенно
+          echo "=== Simple container test ==="
+          container_id=$(docker run -d --name simple-test \
+            -e SECRET_KEY=test-key \
+            -e DEBUG=True \
+            -e ALLOWED_HOSTS=* \
+            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }})
+          
+          sleep 5
+          
+          if docker ps | grep -q simple-test; then
+            echo "✅ Container is running"
+            docker logs simple-test --tail 10
+            docker stop simple-test
+            docker rm simple-test
+          else
+            echo "❌ Container stopped immediately"
+            docker logs simple-test --tail 20
+            exit 1
+          fi
 
       - name: Push Docker image to Docker Hub
         run: |
