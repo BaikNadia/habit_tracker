@@ -90,24 +90,24 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        run: echo "${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Build Docker image
         run: |
-          docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }} .
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} .
 
       - name: Test Docker image
         run: |
-          docker run --rm -d --name test-container -p 8000:8000 ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          docker run --rm -d --name test-container -p 8000:8000 ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
           sleep 10
           docker logs test-container
           docker stop test-container
 
       - name: Push Docker image to Docker Hub
         run: |
-          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
-          docker tag ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }} ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:latest
-          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
 
   deploy:
     needs: build
@@ -130,7 +130,7 @@ jobs:
           echo "Starting deployment from feature/task-4 branch..."
           
           # Pull the latest image
-          docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
           
           # Stop and remove old container if exists
           docker stop habit_tracker || true
@@ -155,7 +155,7 @@ jobs:
             -e TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
             -e CELERY_BROKER_URL='redis://${{ secrets.REDIS_HOST }}:6379/0' \
             -e CELERY_RESULT_BACKEND='redis://${{ secrets.REDIS_HOST }}:6379/0' \
-            ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
           
           # Clean up old images
           docker image prune -f
