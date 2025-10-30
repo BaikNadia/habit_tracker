@@ -22,10 +22,34 @@ jobs:
       - name: Run flake8
         run: flake8 .
 
-
   test:
     needs: lint
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: github_actions
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out code
@@ -40,9 +64,41 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install coverage
 
-      - name: Run tests
-        run: python manage.py test
+      - name: Set up environment variables
+        run: |
+          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
+          echo "DEBUG=False" >> $GITHUB_ENV
+          echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> $GITHUB_ENV
+          echo "DB_NAME=github_actions" >> $GITHUB_ENV
+          echo "DB_USER=postgres" >> $GITHUB_ENV
+          echo "DB_PASSWORD=postgres" >> $GITHUB_ENV
+          echo "DB_HOST=localhost" >> $GITHUB_ENV
+          echo "DB_PORT=5432" >> $GITHUB_ENV
+          echo "TELEGRAM_BOT_TOKEN=dummy_token_for_tests" >> $GITHUB_ENV
+          echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> $GITHUB_ENV
+          echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> $GITHUB_ENV
+
+      - name: Run migrations
+        run: |
+          python manage.py makemigrations
+          python manage.py migrate
+
+      - name: Run tests with coverage
+        run: |
+          coverage run manage.py test habits users telegram_bot
+
+      - name: Generate coverage report
+        run: |
+          coverage report
+          coverage html
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: htmlcov/
 
   build:
     needs: test
@@ -52,15 +108,20 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      - name: Log in in Docker hub
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
         run: echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
 
-      - name: Build Docker image
-        run: docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/myapp:${{ github.sha }} .
-
-      - name: Push Docker image in Docker hub
-        run: docker push ${{ secrets.DOCKER_HUB_USERNAME }}/myapp:{{ github.sha }}
-
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+            ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:latest
 
   deploy:
     needs: build
@@ -75,8 +136,26 @@ jobs:
       - name: Deploy to server
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
-          docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/myapp:${{ github.sha }}
-          docker stop myapp || true
-          docker rm myapp || true
-          docker run -d --name myapp -p 80:8000 ${{ secrets.DOCKER_HUB_USERNAME }}/myapp:${{ github.sha }}
+          # Pull the latest image
+          docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          
+          # Stop and remove old container
+          docker stop habit_tracker || true
+          docker rm habit_tracker || true
+          
+          # Run new container with environment variables
+          docker run -d \
+            --name habit_tracker \
+            -p 80:8000 \
+            -e SECRET_KEY='${{ secrets.SECRET_KEY }}' \
+            -e DEBUG=False \
+            -e ALLOWED_HOSTS='your-domain.com,server-ip' \
+            -e DB_NAME='your_db_name' \
+            -e DB_USER='your_db_user' \
+            -e DB_PASSWORD='your_db_password' \
+            -e DB_HOST='your_db_host' \
+            -e DB_PORT='5432' \
+            -e TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
+            -e CELERY_BROKER_URL='redis://your-redis-host:6379/0' \
+            ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
           EOF
