@@ -94,9 +94,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+
 # Определяем, запущены ли тесты - более надежный способ
 def is_testing():
     return 'test' in sys.argv or 'pytest' in sys.argv or os.getenv('GITHUB_ACTIONS') == 'true'
+
 
 if is_testing():
     # Используем SQLite для тестов
@@ -120,6 +122,7 @@ else:
         }
     }
     print("=== USING POSTGRESQL ===")
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -177,7 +180,9 @@ SWAGGER_SETTINGS = {
 
 # Отключаем миграции для тестов для ускорения
 if is_testing():
+
     class DisableMigrations:
+
         def __contains__(self, item):
             return True
 
