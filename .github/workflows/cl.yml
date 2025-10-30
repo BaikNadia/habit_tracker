@@ -26,31 +26,6 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: github_actions
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -71,44 +46,14 @@ jobs:
           echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
           echo "DEBUG=True" >> $GITHUB_ENV
           echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> $GITHUB_ENV
-          echo "DB_NAME=github_actions" >> $GITHUB_ENV
-          echo "DB_USER=postgres" >> $GITHUB_ENV
-          echo "DB_PASSWORD=postgres" >> $GITHUB_ENV
-          echo "DB_HOST=localhost" >> $GITHUB_ENV
-          echo "DB_PORT=5432" >> $GITHUB_ENV
           echo "TELEGRAM_BOT_TOKEN=dummy_token_for_tests" >> $GITHUB_ENV
           echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> $GITHUB_ENV
           echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> $GITHUB_ENV
 
-      - name: Wait for PostgreSQL
-        run: |
-          sudo apt-get install -y postgresql-client
-          until pg_isready -h localhost -p 5432; do
-            echo "Waiting for PostgreSQL to be ready..."
-            sleep 2
-          done
-          echo "PostgreSQL is ready!"
-
-      - name: Wait for Redis
-        run: |
-          until redis-cli -h localhost -p 6379 ping | grep -q PONG; do
-            echo "Waiting for Redis to be ready..."
-            sleep 2
-          done
-          echo "Redis is ready!"
-
-      - name: Show current environment
-        run: |
-          echo "=== Environment Variables ==="
-          env | grep -E "(SECRET_KEY|DEBUG|DB_|TELEGRAM|CELERY)" || true
-
-      - name: Run migrations
+      - name: Run migrations and tests
         run: |
           python manage.py makemigrations --no-input
           python manage.py migrate --no-input
-
-      - name: Run tests with coverage
-        run: |
           coverage run --source='.' manage.py test habits users telegram_bot -v 2
 
       - name: Generate coverage report
@@ -122,14 +67,6 @@ jobs:
           file: ./coverage.xml
           flags: unittests
           name: codecov-umbrella
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: |
-            coverage.xml
-            htmlcov/
 
   build:
     needs: test
@@ -165,7 +102,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/feature/task-4'
     runs-on: ubuntu-latest
 
     steps:
@@ -177,16 +114,11 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Set up deployment environment variables
-        run: |
-          echo "DEPLOY_SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
-          echo "DEPLOY_TELEGRAM_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> $GITHUB_ENV
-
       - name: Deploy to server
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
           set -e
-          echo "Starting deployment..."
+          echo "Starting deployment from feature/task-4 branch..."
           
           # Pull the latest image
           docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
@@ -219,7 +151,7 @@ jobs:
           # Clean up old images
           docker image prune -f
           
-          echo "Deployment completed successfully!"
+          echo "Deployment from feature/task-4 completed successfully!"
           EOF
 
       - name: Verify deployment
@@ -235,8 +167,8 @@ jobs:
       - name: Notify deployment status
         run: |
           if [ "${{ needs.deploy.result }}" == "success" ]; then
-            echo "🚀 Deployment completed successfully!"
+            echo "🚀 Deployment from feature/task-4 completed successfully!"
             echo "Application is available at: http://${{ secrets.SERVER_IP }}/"
           else
-            echo "❌ Deployment failed"
+            echo "❌ Deployment from feature/task-4 failed"
           fi

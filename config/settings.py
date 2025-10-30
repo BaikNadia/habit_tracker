@@ -94,17 +94,20 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Для тестов используем SQLite, для остального - PostgreSQL
-if 'test' in sys.argv or 'test_coverage' in sys.argv:
-    # Настройки для тестов
+# Определяем, запущены ли тесты
+TESTING = 'test' in sys.argv or 'pytest' in sys.argv
+
+if TESTING:
+    # Используем SQLite для тестов
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'test_db.sqlite3',
+            'NAME': ':memory:',  # Используем in-memory базу для скорости
         }
     }
+    print("=== USING SQLITE FOR TESTS ===")
 else:
-    # Настройки для разработки и продакшена
+    # Используем PostgreSQL для разработки и продакшена
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -115,6 +118,7 @@ else:
             "PORT": os.getenv("DB_PORT", "5432"),
         }
     }
+    print("=== USING POSTGRESQL ===")
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -154,7 +158,7 @@ STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases/#default-auto-field
+# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -170,5 +174,13 @@ SWAGGER_SETTINGS = {
     'USE_SESSION_AUTH': False,  # Отключаем сессионную аутентификацию
 }
 
-# Настройки для тестирования
-TEST_RUNNER = 'django.test.runner.DiscoverRunner'
+# Отключаем миграции для тестов для ускорения
+if TESTING:
+    class DisableMigrations:
+        def __contains__(self, item):
+            return True
+
+        def __getitem__(self, item):
+            return None
+
+    MIGRATION_MODULES = DisableMigrations()
