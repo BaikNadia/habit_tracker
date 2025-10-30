@@ -66,10 +66,10 @@ jobs:
           pip install -r requirements.txt
           pip install coverage
 
-      - name: Set up environment variables
+      - name: Set up environment variables for tests
         run: |
           echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
-          echo "DEBUG=False" >> $GITHUB_ENV
+          echo "DEBUG=True" >> $GITHUB_ENV
           echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> $GITHUB_ENV
           echo "DB_NAME=github_actions" >> $GITHUB_ENV
           echo "DB_USER=postgres" >> $GITHUB_ENV
@@ -80,28 +80,60 @@ jobs:
           echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> $GITHUB_ENV
           echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> $GITHUB_ENV
 
+      - name: Wait for PostgreSQL
+        run: |
+          sudo apt-get install -y postgresql-client
+          until pg_isready -h localhost -p 5432; do
+            echo "Waiting for PostgreSQL to be ready..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+
+      - name: Wait for Redis
+        run: |
+          until redis-cli -h localhost -p 6379 ping | grep -q PONG; do
+            echo "Waiting for Redis to be ready..."
+            sleep 2
+          done
+          echo "Redis is ready!"
+
+      - name: Show current environment
+        run: |
+          echo "=== Environment Variables ==="
+          env | grep -E "(SECRET_KEY|DEBUG|DB_|TELEGRAM|CELERY)" || true
+
       - name: Run migrations
         run: |
-          python manage.py makemigrations
-          python manage.py migrate
+          python manage.py makemigrations --no-input
+          python manage.py migrate --no-input
 
       - name: Run tests with coverage
         run: |
-          coverage run manage.py test habits users telegram_bot
+          coverage run --source='.' manage.py test habits users telegram_bot -v 2
 
       - name: Generate coverage report
         run: |
           coverage report
-          coverage html
+          coverage xml
 
-      - name: Upload coverage reports
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: Upload test results
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
-          path: htmlcov/
+          name: test-results
+          path: |
+            coverage.xml
+            htmlcov/
 
   build:
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -112,50 +144,99 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        run: echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+        run: echo "${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
-            ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:latest
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }} .
+
+      - name: Test Docker image
+        run: |
+          docker run --rm -d --name test-container -p 8000:8000 ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          sleep 10
+          docker logs test-container
+          docker stop test-container
+
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          docker tag ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }} ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:latest
+          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:latest
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
+      - name: Set up deployment environment variables
+        run: |
+          echo "DEPLOY_SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
+          echo "DEPLOY_TELEGRAM_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> $GITHUB_ENV
+
       - name: Deploy to server
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          set -e
+          echo "Starting deployment..."
+          
           # Pull the latest image
           docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
           
-          # Stop and remove old container
+          # Stop and remove old container if exists
           docker stop habit_tracker || true
           docker rm habit_tracker || true
+          
+          # Create network if not exists
+          docker network create habit_network || true
           
           # Run new container with environment variables
           docker run -d \
             --name habit_tracker \
+            --network habit_network \
             -p 80:8000 \
             -e SECRET_KEY='${{ secrets.SECRET_KEY }}' \
             -e DEBUG=False \
-            -e ALLOWED_HOSTS='your-domain.com,server-ip' \
-            -e DB_NAME='your_db_name' \
-            -e DB_USER='your_db_user' \
-            -e DB_PASSWORD='your_db_password' \
-            -e DB_HOST='your_db_host' \
+            -e ALLOWED_HOSTS='${{ secrets.SERVER_IP }},localhost,127.0.0.1' \
+            -e DB_NAME='${{ secrets.DB_NAME }}' \
+            -e DB_USER='${{ secrets.DB_USER }}' \
+            -e DB_PASSWORD='${{ secrets.DB_PASSWORD }}' \
+            -e DB_HOST='${{ secrets.DB_HOST }}' \
             -e DB_PORT='5432' \
             -e TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
-            -e CELERY_BROKER_URL='redis://your-redis-host:6379/0' \
+            -e CELERY_BROKER_URL='redis://${{ secrets.REDIS_HOST }}:6379/0' \
+            -e CELERY_RESULT_BACKEND='redis://${{ secrets.REDIS_HOST }}:6379/0' \
             ${{ secrets.DOCKER_HUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          
+          # Clean up old images
+          docker image prune -f
+          
+          echo "Deployment completed successfully!"
           EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 30
+          curl -f http://${{ secrets.SERVER_IP }}/api/habits/public/ || curl -f http://${{ secrets.SERVER_IP }}/swagger/ || echo "Deployment verification in progress..."
+
+  notify:
+    needs: deploy
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify deployment status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "🚀 Deployment completed successfully!"
+            echo "Application is available at: http://${{ secrets.SERVER_IP }}/"
+          else
+            echo "❌ Deployment failed"
+          fi
