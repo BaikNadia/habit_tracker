@@ -1,6 +1,9 @@
 name: habit_tracker
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [feature/task-4]
+  pull_request:
 
 env:
   GITHUB_ACTIONS: true
@@ -28,9 +31,6 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
-    env:
-      GITHUB_ACTIONS: true
-
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -44,50 +44,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install coverage
 
-      - name: Set up environment variables for tests
+      - name: Run tests
         run: |
-          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
-          echo "DEBUG=True" >> $GITHUB_ENV
-          echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> $GITHUB_ENV
-          echo "TELEGRAM_BOT_TOKEN=dummy_token_for_tests" >> $GITHUB_ENV
-          echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> $GITHUB_ENV
-          echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> $GITHUB_ENV
-
-      - name: Run migrations and tests
-        run: |
-          python manage.py makemigrations --no-input
-          python manage.py migrate --run-syncdb
-          coverage run --source='.' manage.py test habits users telegram_bot -v 2
-
-      - name: Generate coverage report
-        run: |
-          coverage report
-          coverage xml
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-
-      - name: Clean up test database
-        run: |
-          rm -f test_db.sqlite3
+          python manage.py test habits users telegram_bot -v 2
 
   build:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
@@ -95,27 +63,19 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} .
-
-      - name: Check Docker image
-        run: |
-          echo "=== Checking Docker image ==="
-          docker images | grep habit-tracker
-          echo "✅ Docker image built successfully"
-
-      - name: Push Docker image to Docker Hub
-        run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
 
   deploy:
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/feature/task-4'
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -125,38 +85,21 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Add server to known hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
-
-      - name: Test SSH connection
-        run: |
-          ssh -o BatchMode=yes ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "echo '✅ SSH connection successful'"
-
       - name: Deploy to server
         run: |
-          ssh -o BatchMode=yes ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
           set -e
-          echo "🚀 Starting deployment from feature/task-4 branch..."
+          echo "🚀 Starting deployment..."
           
-          # Log in to Docker Hub on server
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           
-          echo "📦 Pulling the latest image..."
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
           
-          echo "🛑 Stopping old container..."
           docker stop habit_tracker || true
           docker rm habit_tracker || true
           
-          echo "🔗 Creating network..."
-          docker network create habit_network || true
-          
-          echo "🐳 Starting new container..."
           docker run -d \
             --name habit_tracker \
-            --network habit_network \
             -p 80:8000 \
             -e SECRET_KEY='${{ secrets.SECRET_KEY }}' \
             -e DEBUG=False \
@@ -171,49 +114,10 @@ jobs:
             -e CELERY_RESULT_BACKEND='redis://${{ secrets.REDIS_HOST }}:6379/0' \
             ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
           
-          echo "🧹 Cleaning up..."
-          docker image prune -f
-          
           echo "✅ Deployment completed successfully!"
           EOF
 
-      - name: Wait for application
-        run: |
-          echo "⏳ Waiting for application to start..."
-          sleep 30
-
       - name: Verify deployment
         run: |
-          echo "🔍 Verifying deployment..."
-          curl -f http://${{ secrets.SERVER_IP }}/ || \
-          curl -f http://${{ secrets.SERVER_IP }}/api/habits/public/ || \
-          curl -f http://${{ secrets.SERVER_IP }}/swagger/ || \
-          echo "⚠️ Application might be still starting..."
-
-      - name: Check container status
-        run: |
-          echo "📊 Checking container status..."
-          ssh -o BatchMode=yes ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
-            echo '=== Running containers ==='
-            docker ps | grep habit_tracker || echo 'No running habit_tracker container'
-            echo '=== All containers ==='
-            docker ps -a | grep habit_tracker || echo 'No habit_tracker containers found'
-            echo '=== Container logs ==='
-            docker logs habit_tracker --tail 30 || echo 'Cannot get container logs'
-          "
-
-  notify:
-    needs: deploy
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Notify deployment status
-        run: |
-          if [ "${{ needs.deploy.result }}" == "success" ]; then
-            echo "🎉 Deployment completed successfully!"
-            echo "🌐 Application URL: http://${{ secrets.SERVER_IP }}/"
-            echo "🐳 Docker image: ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}"
-          else
-            echo "❌ Deployment failed"
-            echo "Check the logs above for details"
-          fi
+          sleep 10
+          curl -f http://${{ secrets.SERVER_IP }}/ || echo "Application is starting..."
