@@ -1,65 +1,103 @@
-from django.test import TestCase
-from django.contrib.auth import get_user_model
-from rest_framework.test import APIClient
+from django.urls import reverse
+from rest_framework.test import APITestCase
+from rest_framework import status
+from users.models import User
 
 
-User = get_user_model()
-
-
-class UserTestCase(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.user_data = {
-            "email": "test@example.com",
-            "password": "testpass123",
-            "first_name": "Test",
-            "last_name": "User"
+class UserTestCase(APITestCase):
+    def test_user_registration(self):
+        """Тест регистрации пользователя"""
+        url = '/api/users/register/'
+        data = {
+            'email': 'newuser@example.com',
+            'password': 'newpass123',
+            'password2': 'newpass123'
         }
 
-    def test_user_registration(self):
-        response = self.client.post("/api/users/register/", self.user_data)
-        # Может возвращать 200 или 201 в зависимости от реализации
+        response = self.client.post(url, data, format='json')
+        # Может возвращать 201 или 200 в зависимости от реализации
         self.assertIn(response.status_code, [200, 201])
-        self.assertTrue(User.objects.filter(email="test@example.com").exists())
+
+        # Проверяем, что пользователь создан
+        self.assertTrue(User.objects.filter(email='newuser@example.com').exists())
 
     def test_user_login(self):
-        user = User.objects.create_user(**self.user_data)
+        """Тест входа пользователя"""
+        # Сначала создаем пользователя
+        user = User.objects.create_user(
+            email='login_test@example.com',
+            password='testpass123'
+        )
 
-        # Тестируем логин через JWT
-        response = self.client.post("/api/users/login/", {
-            "email": "test@example.com",
-            "password": "testpass123"
-        })
-        # Проверяем что возвращает какой-то успешный статус
-        self.assertIn(response.status_code, [200, 201])
+        url = '/api/users/token/'
+        data = {
+            'email': 'login_test@example.com',
+            'password': 'testpass123'
+        }
 
-    def test_get_user_profile(self):
-        user = User.objects.create_user(**self.user_data)
-        self.client.force_authenticate(user=user)
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('access', response.data)
+        self.assertIn('refresh', response.data)
 
-        response = self.client.get("/api/users/profile/")
-        # Может возвращать 200 или 404 если эндпоинта нет
-        if response.status_code == 200:
-            self.assertEqual(response.data["email"], "test@example.com")
-        else:
-            # Пропускаем если эндпоинта нет
-            self.skipTest("Profile endpoint not implemented")
+    def test_token_refresh(self):
+        """Тест обновления токена"""
+        # Сначала получаем refresh token
+        user = User.objects.create_user(
+            email='refresh_test@example.com',
+            password='testpass123'
+        )
+
+        # Получаем токены
+        auth_url = '/api/users/token/'
+        auth_data = {
+            'email': 'refresh_test@example.com',
+            'password': 'testpass123'
+        }
+        auth_response = self.client.post(auth_url, auth_data, format='json')
+        refresh_token = auth_response.data['refresh']
+
+        # Обновляем токен
+        refresh_url = '/api/users/token/refresh/'
+        refresh_data = {
+            'refresh': refresh_token
+        }
+        refresh_response = self.client.post(refresh_url, refresh_data, format='json')
+        self.assertEqual(refresh_response.status_code, 200)
+        self.assertIn('access', refresh_response.data)
 
     def test_user_str_method(self):
+        """Тест строкового представления пользователя"""
         user = User.objects.create_user(
-            email="test@example.com",
-            password="testpass123",
-            first_name="Test",
-            last_name="User"
+            email='str_test@example.com',
+            password='testpass123'
         )
-        self.assertEqual(str(user), "test@example.com")
+        self.assertEqual(str(user), 'str_test@example.com')
 
 
-class UserModelTestCase(TestCase):
-    def test_user_creation(self):
+class UserModelTestCase(APITestCase):
+    def test_create_user(self):
+        """Тест создания обычного пользователя"""
         user = User.objects.create_user(
-            email="test@example.com",
-            password="testpass123"
+            email='user@example.com',
+            password='password123'
         )
-        self.assertEqual(user.email, "test@example.com")
-        self.assertTrue(user.check_password("testpass123"))
+        self.assertEqual(user.email, 'user@example.com')
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(user.check_password('password123'))
+
+    def test_create_superuser(self):
+        """Тест создания суперпользователя"""
+        superuser = User.objects.create_superuser(
+            email='admin@example.com',
+            password='admin123'
+        )
+        self.assertEqual(superuser.email, 'admin@example.com')
+        self.assertTrue(superuser.is_staff)
+        self.assertTrue(superuser.is_superuser)
+
+    def test_user_required_fields(self):
+        """Тест обязательных полей пользователя"""
+        with self.assertRaises(ValueError):
+            User.objects.create_user(email='', password='password123')

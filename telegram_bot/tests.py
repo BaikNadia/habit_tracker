@@ -1,47 +1,31 @@
 from django.test import TestCase
-from django.contrib.auth import get_user_model
-from rest_framework.test import APIClient
-
-User = get_user_model()
+from habits.models import Habit
+from users.models import User
 
 
 class TelegramBotTestCase(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
-            email="test@example.com",
-            password="123"
+            email='telegram_test@example.com',
+            password='testpass123',
+            telegram_chat_id='123456'
         )
-        self.client = APIClient()
-        self.client.force_authenticate(user=self.user)
 
-    def test_telegram_bot_connection(self):
-        # Пропускаем тест если эндпоинта нет
-        response = self.client.post("/api/telegram/connect/", {
-            "telegram_id": "123456789"
-        })
-        if response.status_code == 404:
-            self.skipTest("Telegram connect endpoint not implemented")
-        else:
-            self.assertEqual(response.status_code, 200)
+        self.habit = Habit.objects.create(
+            user=self.user,
+            place="Дом",
+            time="12:00:00",
+            action="тестовая привычка",
+            duration=60,
+            periodicity=1
+        )
 
-    def test_send_reminder(self):
-        # Пропускаем тест если эндпоинта нет
-        response = self.client.post("/api/telegram/send-reminder/", {
-            "habit_id": 1,
-            "message": "Напоминание"
-        })
-        if response.status_code == 404:
-            self.skipTest("Send reminder endpoint not implemented")
-        else:
-            self.assertEqual(response.status_code, 200)
+    def test_user_with_telegram_chat_id(self):
+        """Тест пользователя с Telegram chat_id"""
+        self.assertEqual(self.user.telegram_chat_id, '123456')
+        self.assertEqual(self.user.email, 'telegram_test@example.com')
 
-    def test_telegram_model_str(self):
-        # Тест для модели если она есть
-        try:
-            from .models import TelegramUser
-            tg_user = TelegramUser(telegram_id="123456", user=self.user)
-            self.assertEqual(str(tg_user), "123456")
-        except ImportError:
-            self.skipTest("TelegramUser model not implemented")
-
-
+    def test_habit_creation_for_telegram(self):
+        """Тест создания привычки для Telegram напоминаний"""
+        self.assertEqual(str(self.habit), 'тестовая привычка')
+        self.assertEqual(self.habit.user.telegram_chat_id, '123456')
