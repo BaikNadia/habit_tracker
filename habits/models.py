@@ -17,6 +17,14 @@ class Habit(models.Model):
     duration = models.PositiveSmallIntegerField()  # seconds
     is_public = models.BooleanField(default=False)
 
+    class Meta:
+        ordering = ['-id']  # Сортировка по ID в обратном порядке (новые привычки first)
+        verbose_name = 'Привычка'
+        verbose_name_plural = 'Привычки'
+
+    def __str__(self):
+        return self.action
+
     def clean(self):
         # 1. Нельзя одновременно указывать вознаграждение и связанную привычку
         if self.reward and self.related_habit:
