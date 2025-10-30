@@ -94,10 +94,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Определяем, запущены ли тесты
-TESTING = 'test' in sys.argv or 'pytest' in sys.argv
+# Определяем, запущены ли тесты - более надежный способ
+def is_testing():
+    return 'test' in sys.argv or 'pytest' in sys.argv or os.getenv('GITHUB_ACTIONS') == 'true'
 
-if TESTING:
+if is_testing():
     # Используем SQLite для тестов
     DATABASES = {
         'default': {
@@ -175,7 +176,7 @@ SWAGGER_SETTINGS = {
 }
 
 # Отключаем миграции для тестов для ускорения
-if TESTING:
+if is_testing():
     class DisableMigrations:
         def __contains__(self, item):
             return True

@@ -2,6 +2,9 @@ name: habit_tracker
 
 on: [push, pull_request]
 
+env:
+  GITHUB_ACTIONS: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -25,6 +28,8 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
+    env:
+      GITHUB_ACTIONS: true
 
     steps:
       - name: Check out code
@@ -50,7 +55,7 @@ jobs:
           echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> $GITHUB_ENV
           echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> $GITHUB_ENV
 
-      - name: Run migrations and tests
+      - name: Run tests with coverage
         run: |
           python manage.py makemigrations --no-input
           python manage.py migrate --no-input
