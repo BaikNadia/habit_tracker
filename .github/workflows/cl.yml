@@ -1,3 +1,123 @@
+name: habit_tracker
+
+on: [push, pull_request]
+
+env:
+  GITHUB_ACTIONS: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install flake8
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Run flake8
+        run: flake8 .
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_ACTIONS: true
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install coverage
+
+      - name: Set up environment variables for tests
+        run: |
+          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
+          echo "DEBUG=True" >> $GITHUB_ENV
+          echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> $GITHUB_ENV
+          echo "TELEGRAM_BOT_TOKEN=dummy_token_for_tests" >> $GITHUB_ENV
+          echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> $GITHUB_ENV
+          echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> $GITHUB_ENV
+
+      - name: Run migrations and tests
+        run: |
+          python manage.py makemigrations --no-input
+          python manage.py migrate --run-syncdb
+          coverage run --source='.' manage.py test habits users telegram_bot -v 2
+
+      - name: Generate coverage report
+        run: |
+          coverage report
+          coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: Clean up test database
+        run: |
+          rm -f test_db.sqlite3
+
+  build:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify Docker Hub credentials
+        run: |
+          echo "DockerHub Username: ${{ secrets.DOCKERHUB_USERNAME }}"
+          echo "Token length: ${#DOCKERHUB_TOKEN} characters"
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} .
+
+      - name: Check Docker image
+        run: |
+          echo "=== Checking Docker image ==="
+          docker images | grep habit-tracker
+          echo "✅ Docker image built successfully"
+
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
+
   deploy:
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/feature/task-4'
@@ -77,3 +197,18 @@
       - name: Check container status
         run: |
           ssh -o BatchMode=yes -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "docker ps -a | grep habit_tracker && echo '=== Container logs ===' && docker logs habit_tracker --tail 50 || echo 'Container not found'"
+
+  notify:
+    needs: deploy
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify deployment status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "🚀 Deployment from feature/task-4 completed successfully!"
+            echo "Application is available at: http://${{ secrets.SERVER_IP }}/"
+          else
+            echo "❌ Deployment from feature/task-4 failed"
+            echo "Check the container logs above for details"
+          fi
