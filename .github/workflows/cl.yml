@@ -89,8 +89,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Verify Docker Hub credentials
+        run: |
+          echo "DockerHub Username: ${{ secrets.DOCKERHUB_USERNAME }}"
+          echo "Token length: ${#DOCKERHUB_TOKEN} characters"
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Log in to Docker Hub
-        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build Docker image
         run: |
@@ -98,7 +108,6 @@ jobs:
 
       - name: Check Docker image
         run: |
-          # Простая проверка что образ создан
           echo "=== Checking Docker image ==="
           docker images | grep habit-tracker
           echo "✅ Docker image built successfully"
@@ -128,6 +137,9 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
           set -e
           echo "Starting deployment from feature/task-4 branch..."
+          
+          # Log in to Docker Hub on server
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           
           # Pull the latest image
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
@@ -171,7 +183,7 @@ jobs:
       - name: Verify deployment
         run: |
           echo "=== Verifying deployment ==="
-          # Пробуем разные эндпоинты для проверки
+          # Try multiple endpoints
           curl -f http://${{ secrets.SERVER_IP }}/api/habits/public/ || \
           curl -f http://${{ secrets.SERVER_IP }}/swagger/ || \
           curl -f http://${{ secrets.SERVER_IP }}/admin/ || \
