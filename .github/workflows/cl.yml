@@ -55,10 +55,10 @@ jobs:
           echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> $GITHUB_ENV
           echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> $GITHUB_ENV
 
-      - name: Run tests with coverage
+      - name: Run migrations and tests
         run: |
           python manage.py makemigrations --no-input
-          python manage.py migrate --no-input
+          python manage.py migrate --run-syncdb
           coverage run --source='.' manage.py test habits users telegram_bot -v 2
 
       - name: Generate coverage report
@@ -72,6 +72,10 @@ jobs:
           file: ./coverage.xml
           flags: unittests
           name: codecov-umbrella
+
+      - name: Clean up test database
+        run: |
+          rm -f test_db.sqlite3
 
   build:
     needs: test

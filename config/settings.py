@@ -105,7 +105,7 @@ if is_testing():
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': ':memory:',  # Используем in-memory базу для скорости
+            'NAME': BASE_DIR / 'test_db.sqlite3',  # Используем файловую базу для тестов
         }
     }
     print("=== USING SQLITE FOR TESTS ===")
