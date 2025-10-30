@@ -45,8 +45,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run tests with environment variables
         run: |
+          export SECRET_KEY="test-secret-key-for-github-actions-12345"
+          export DEBUG=True
+          export ALLOWED_HOSTS=localhost,127.0.0.1
+          export TELEGRAM_BOT_TOKEN=test-token
+          export CELERY_BROKER_URL=redis://localhost:6379/0
+          export CELERY_RESULT_BACKEND=redis://localhost:6379/0
           python manage.py test habits users telegram_bot -v 2
 
   build:
