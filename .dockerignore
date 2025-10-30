@@ -1,7 +1,13 @@
 .git
 .gitignore
+README.md
 .env
-venv
+.venv
 __pycache__
 *.pyc
-test_db.sqlite3
+*.pyo
+*.pyd
+.Python
+htmlcov/
+.coverage
+.coverage.*
