@@ -1,8 +1,8 @@
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
@@ -14,7 +14,6 @@ DEBUG = os.getenv("DEBUG", False) == "True"
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 ALLOWED_HOSTS = []
 
@@ -58,8 +57,6 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True  # Для учебного проекта. В продакшене — ограничить!
-
-
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
@@ -160,3 +157,11 @@ SWAGGER_SETTINGS = {
     },
     'USE_SESSION_AUTH': False,  # Отключаем сессионную аутентификацию
 }
+
+if 'test' in sys.argv:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'test_db.sqlite3',
+        }
+    }
