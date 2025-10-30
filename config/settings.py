@@ -4,7 +4,6 @@ from pathlib import Path
 from datetime import timedelta
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -15,7 +14,6 @@ DEBUG = os.getenv("DEBUG", False) == "True"
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 ALLOWED_HOSTS = []
 
@@ -59,8 +57,6 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True  # Для учебного проекта. В продакшене — ограничить!
-
-
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
