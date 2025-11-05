@@ -2,7 +2,7 @@ name: habit_tracker
 
 on:
   push:
-    branches: [feature/task-4, main, master]
+    branches: [feature/task-6, main, master]
   pull_request:
 
 env:
@@ -76,7 +76,6 @@ jobs:
 
   deploy:
     needs: build
-
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -99,30 +98,44 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
           set -e
           echo "🚀 Starting deployment from branch: ${{ github.ref }}..."
-          
+
+          # Логин в Docker Hub
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          
+
+          # Останавливаем и удаляем старые контейнеры
+          docker-compose down || true
+
+          # Удаляем старые образы
+          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} || true
+          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker-celery:${{ github.sha }} || true
+
+          # Скачиваем новые образы
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
-          
-          docker stop habit_tracker || true
-          docker rm habit_tracker || true
-          
-          docker run -d \
-            --name habit_tracker \
-            -p 80:8000 \
-            -e SECRET_KEY='${{ secrets.SECRET_KEY }}' \
-            -e DEBUG=False \
-            -e ALLOWED_HOSTS='${{ secrets.SERVER_IP }},localhost,127.0.0.1' \
-            -e DB_NAME='${{ secrets.DB_NAME }}' \
-            -e DB_USER='${{ secrets.DB_USER }}' \
-            -e DB_PASSWORD='${{ secrets.DB_PASSWORD }}' \
-            -e DB_HOST='${{ secrets.DB_HOST }}' \
-            -e DB_PORT='5432' \
-            -e TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
-            -e CELERY_BROKER_URL='redis://${{ secrets.REDIS_HOST }}:6379/0' \
-            -e CELERY_RESULT_BACKEND='redis://${{ secrets.REDIS_HOST }}:6379/0' \
-            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
-          
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker-celery:${{ github.sha }}
+
+          # Создаем .env файл на сервере
+          cat > .env << EOL
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          DEBUG=False
+          ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1
+
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_HOST=db
+          DB_PORT=5432
+
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+          REDIS_HOST=redis
+
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+          SERVER_IP=${{ secrets.SERVER_IP }}
+          EOL
+
+          # Запускаем compose
+          docker-compose up -d
+
           echo "✅ Deployment completed successfully!"
           EOF
 
