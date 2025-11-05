@@ -94,5 +94,74 @@ jobs:
 
       - name: Deploy to server
         run: |
-          # Твой код деплоя здесь
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            mkdir -p /home/${{ secrets.SSH_USER }}/habit_tracker
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            cat > .env << 'EOF'
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          DEBUG=False
+          ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1,0.0.0.0
+          DB_ENGINE=django.db.backends.postgresql
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_HOST=db
+          DB_PORT=5432
+          CELERY_BROKER_URL=redis://redis:6379/0
+          CELERY_RESULT_BACKEND=redis://redis:6379/0
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+          GIT_COMMIT=${{ github.sha }}
+          EOF
+          "
+
+      - name: Copy docker-compose.yml
+        run: |
+          scp -o StrictHostKeyChecking=no docker-compose.yml ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }}:/home/${{ secrets.SSH_USER }}/habit_tracker/docker-compose.yml
+
+      - name: Login to Docker Hub on server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            docker login -u '${{ secrets.DOCKERHUB_USERNAME }}' -p '${{ secrets.DOCKERHUB_TOKEN }}'
+          "
+
+      - name: Stop old containers
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            docker compose down || true
+          "
+
+      - name: Pull new image
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          "
+
+      - name: Start services
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            docker compose up -d
+          "
+
+      - name: Run migrations
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            sleep 10
+            docker compose exec web python manage.py migrate
+          "
+
+      - name: Collect static files
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            docker compose exec web python manage.py collectstatic --noinput
+          "
+
+      - name: Verify deployment
+        run: |
+          sleep 30
+          curl -f http://${{ secrets.SERVER_IP }}:8000/ || echo "App is starting..."
           echo "Deploying..."
