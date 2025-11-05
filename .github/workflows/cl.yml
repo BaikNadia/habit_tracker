@@ -1,9 +1,8 @@
-name: habit_tracker
+name: Deploy Habit Tracker
 
 on:
   push:
-    branches: [feature/task-6, main, master]
-  pull_request:
+    branches: [ main, develop ]
 
 env:
   GITHUB_ACTIONS: true
@@ -81,13 +80,6 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Debug branch info
-        run: |
-          echo "Current ref: ${{ github.ref }}"
-          echo "Event name: ${{ github.event_name }}"
-          echo "Head ref: ${{ github.head_ref }}"
-          echo "Base ref: ${{ github.base_ref }}"
-
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -97,51 +89,130 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
           set -e
-          echo "🚀 Starting deployment from branch: ${{ github.ref }}..."
+          echo "🚀 Starting deployment..."
 
           # Логин в Docker Hub
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-          # Останавливаем и удаляем старые контейнеры
-          docker-compose down || true
-
-          # Удаляем старые образы
-          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} || true
-          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker-celery:${{ github.sha }} || true
-
-          # Скачиваем новые образы
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker-celery:${{ github.sha }}
+          # Создаем директорию проекта если не существует
+          mkdir -p /home/${{ secrets.SSH_USER }}/habit_tracker
+          cd /home/${{ secrets.SSH_USER }}/habit_tracker
 
           # Создаем .env файл на сервере
-          cat > .env << EOL
+          cat > .env << 'ENVEOF'
           SECRET_KEY=${{ secrets.SECRET_KEY }}
           DEBUG=False
-          ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1
+          ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1,0.0.0.0
 
+          DB_ENGINE=django.db.backends.postgresql
           DB_NAME=${{ secrets.DB_NAME }}
           DB_USER=${{ secrets.DB_USER }}
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
           DB_HOST=db
           DB_PORT=5432
 
-          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-          REDIS_HOST=redis
+          CELERY_BROKER_URL=redis://redis:6379/0
+          CELERY_RESULT_BACKEND=redis://redis:6379/0
 
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
 
-          SERVER_IP=${{ secrets.SERVER_IP }}
-          EOL
+          DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+          GIT_COMMIT=${{ github.sha }}
+          ENVEOF
 
-          # Запускаем compose
-          docker-compose up -d
+          # Создаем docker-compose.yml файл на сервере
+          cat > docker-compose.yml << 'COMPOSEEOF'
+          version: '3.8'
+
+          services:
+            db:
+              image: postgres:13
+              environment:
+                POSTGRES_DB: ${DB_NAME}
+                POSTGRES_USER: ${DB_USER}
+                POSTGRES_PASSWORD: ${DB_PASSWORD}
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+              env_file:
+                - .env
+
+            redis:
+              image: redis:7-alpine
+
+            web:
+              image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
+              command: python manage.py runserver 0.0.0.0:8000
+              volumes:
+                - static_volume:/app/staticfiles
+                - media_volume:/app/mediafiles
+              environment:
+                - DEBUG=False
+              env_file:
+                - .env
+              depends_on:
+                - db
+                - redis
+              ports:
+                - "8000:8000"
+
+            celery:
+              image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
+              command: celery -A config worker --loglevel=info
+              volumes:
+                - static_volume:/app/staticfiles
+                - media_volume:/app/mediafiles
+              env_file:
+                - .env
+              depends_on:
+                - db
+                - redis
+
+            celery_beat:
+              image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
+              command: celery -A config beat --loglevel=info
+              volumes:
+                - static_volume:/app/staticfiles
+                - media_volume:/app/mediafiles
+              env_file:
+                - .env
+              depends_on:
+                - db
+                - redis
+
+          volumes:
+            postgres_data:
+            static_volume:
+            media_volume:
+          COMPOSEEOF
+
+          # Останавливаем и удаляем старые контейнеры
+          docker compose down || true
+
+          # Удаляем старый образ
+          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }} || true
+
+          # Скачиваем новый образ
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
+
+          # Запускаем сервисы
+          docker compose up -d
+
+          # Ждем запуска базы данных
+          sleep 10
+
+          # Выполняем миграции
+          docker compose exec web python manage.py migrate
+
+          # Собираем статические файлы
+          docker compose exec web python manage.py collectstatic --noinput
 
           echo "✅ Deployment completed successfully!"
           EOF
 
       - name: Verify deployment
         run: |
-          sleep 15
-          curl -f http://${{ secrets.SERVER_IP }}/ || \
-          curl -f http://${{ secrets.SERVER_IP }}/api/habits/public/ || \
+          sleep 30
+          curl -f http://${{ secrets.SERVER_IP }}:8000/ || \
+          curl -f http://${{ secrets.SERVER_IP }}:8000/api/habits/ || \
+          curl -f http://${{ secrets.SERVER_IP }}:8000/swagger/ || \
           echo "Application is starting..."
