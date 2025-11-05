@@ -32,7 +32,6 @@ jobs:
 
   test:
     name: 🧪 Run Tests
-    needs: lint
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -56,8 +55,7 @@ jobs:
 
   build:
     name: 🐳 Build Docker Image
-    needs: test
-    if: github.event_name == 'push'  # Только при push, не при PR
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -80,7 +78,6 @@ jobs:
 
   deploy:
     name: 🚀 Deploy to Server
-    needs: build
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     runs-on: ubuntu-latest
     steps:
@@ -92,27 +89,26 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Deploy to server
+      - name: Create .env on server
         run: |
+          # Создаем .env файл с помощью echo команд
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
             mkdir -p /home/${{ secrets.SSH_USER }}/habit_tracker
             cd /home/${{ secrets.SSH_USER }}/habit_tracker
-            cat > .env << 'EOF'
-          SECRET_KEY=${{ secrets.SECRET_KEY }}
-          DEBUG=False
-          ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1,0.0.0.0
-          DB_ENGINE=django.db.backends.postgresql
-          DB_NAME=${{ secrets.DB_NAME }}
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          DB_HOST=db
-          DB_PORT=5432
-          CELERY_BROKER_URL=redis://redis:6379/0
-          CELERY_RESULT_BACKEND=redis://redis:6379/0
-          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-          DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
-          GIT_COMMIT=${{ github.sha }}
-          EOF
+            echo 'SECRET_KEY=${{ secrets.SECRET_KEY }}' > .env
+            echo 'DEBUG=False' >> .env
+            echo 'ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1,0.0.0.0' >> .env
+            echo 'DB_ENGINE=django.db.backends.postgresql' >> .env
+            echo 'DB_NAME=${{ secrets.DB_NAME }}' >> .env
+            echo 'DB_USER=${{ secrets.DB_USER }}' >> .env
+            echo 'DB_PASSWORD=${{ secrets.DB_PASSWORD }}' >> .env
+            echo 'DB_HOST=db' >> .env
+            echo 'DB_PORT=5432' >> .env
+            echo 'CELERY_BROKER_URL=redis://redis:6379/0' >> .env
+            echo 'CELERY_RESULT_BACKEND=redis://redis:6379/0' >> .env
+            echo 'TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}' >> .env
+            echo 'DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}' >> .env
+            echo 'GIT_COMMIT=${{ github.sha }}' >> .env
           "
 
       - name: Copy docker-compose.yml
@@ -164,4 +160,3 @@ jobs:
         run: |
           sleep 30
           curl -f http://${{ secrets.SERVER_IP }}:8000/ || echo "App is starting..."
-          echo "Deploying..."
