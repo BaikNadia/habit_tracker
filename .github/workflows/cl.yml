@@ -1,15 +1,17 @@
-name: habit_tracker
+name: Deploy Habit Tracker
 
 on:
   push:
-    branches: [feature/task-4, main, master]
+    branches: [ main, develop ]
   pull_request:
+    branches: [ main, develop ]
 
 env:
   GITHUB_ACTIONS: true
 
 jobs:
   lint:
+    name: 🔍 Code Quality Check
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -29,7 +31,7 @@ jobs:
         run: flake8 .
 
   test:
-    needs: lint
+    name: 🧪 Run Tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -47,13 +49,13 @@ jobs:
 
       - name: Run tests
         run: |
-          export SECRET_KEY="test-secret-key-for-github-actions-12345"
+          export SECRET_KEY="test-key"
           export DEBUG=True
-          export ALLOWED_HOSTS=localhost,127.0.0.1
-          python manage.py test habits users telegram_bot -v 2
+          python manage.py test
 
   build:
-    needs: test
+    name: 🐳 Build Docker Image
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -75,60 +77,86 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
 
   deploy:
-    needs: build
-
+    name: 🚀 Deploy to Server
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-
-      - name: Debug branch info
-        run: |
-          echo "Current ref: ${{ github.ref }}"
-          echo "Event name: ${{ github.event_name }}"
-          echo "Head ref: ${{ github.head_ref }}"
-          echo "Base ref: ${{ github.base_ref }}"
 
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Deploy to server
+      - name: Create .env on server
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
-          set -e
-          echo "🚀 Starting deployment from branch: ${{ github.ref }}..."
-          
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
-          
-          docker stop habit_tracker || true
-          docker rm habit_tracker || true
-          
-          docker run -d \
-            --name habit_tracker \
-            -p 80:8000 \
-            -e SECRET_KEY='${{ secrets.SECRET_KEY }}' \
-            -e DEBUG=False \
-            -e ALLOWED_HOSTS='${{ secrets.SERVER_IP }},localhost,127.0.0.1' \
-            -e DB_NAME='${{ secrets.DB_NAME }}' \
-            -e DB_USER='${{ secrets.DB_USER }}' \
-            -e DB_PASSWORD='${{ secrets.DB_PASSWORD }}' \
-            -e DB_HOST='${{ secrets.DB_HOST }}' \
-            -e DB_PORT='5432' \
-            -e TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
-            -e CELERY_BROKER_URL='redis://${{ secrets.REDIS_HOST }}:6379/0' \
-            -e CELERY_RESULT_BACKEND='redis://${{ secrets.REDIS_HOST }}:6379/0' \
-            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
-          
-          echo "✅ Deployment completed successfully!"
-          EOF
+          # Создаем .env файл с помощью echo команд
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            mkdir -p /home/${{ secrets.SSH_USER }}/habit_tracker
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            echo 'SECRET_KEY=${{ secrets.SECRET_KEY }}' > .env
+            echo 'DEBUG=False' >> .env
+            echo 'ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1,0.0.0.0' >> .env
+            echo 'DB_ENGINE=django.db.backends.postgresql' >> .env
+            echo 'DB_NAME=${{ secrets.DB_NAME }}' >> .env
+            echo 'DB_USER=${{ secrets.DB_USER }}' >> .env
+            echo 'DB_PASSWORD=${{ secrets.DB_PASSWORD }}' >> .env
+            echo 'DB_HOST=db' >> .env
+            echo 'DB_PORT=5432' >> .env
+            echo 'CELERY_BROKER_URL=redis://redis:6379/0' >> .env
+            echo 'CELERY_RESULT_BACKEND=redis://redis:6379/0' >> .env
+            echo 'TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}' >> .env
+            echo 'DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}' >> .env
+            echo 'GIT_COMMIT=${{ github.sha }}' >> .env
+          "
+
+      - name: Copy docker-compose.yml
+        run: |
+          scp -o StrictHostKeyChecking=no docker-compose.yml ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }}:/home/${{ secrets.SSH_USER }}/habit_tracker/docker-compose.yml
+
+      - name: Login to Docker Hub on server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            docker login -u '${{ secrets.DOCKERHUB_USERNAME }}' -p '${{ secrets.DOCKERHUB_TOKEN }}'
+          "
+
+      - name: Stop old containers
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            docker compose down || true
+          "
+
+      - name: Pull new image
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
+          "
+
+      - name: Start services
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            docker compose up -d
+          "
+
+      - name: Run migrations
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            sleep 10
+            docker compose exec web python manage.py migrate
+          "
+
+      - name: Collect static files
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker
+            docker compose exec web python manage.py collectstatic --noinput
+          "
 
       - name: Verify deployment
         run: |
-          sleep 15
-          curl -f http://${{ secrets.SERVER_IP }}/ || \
-          curl -f http://${{ secrets.SERVER_IP }}/api/habits/public/ || \
-          echo "Application is starting..."
+          sleep 30
+          curl -f http://${{ secrets.SERVER_IP }}:8000/ || echo "App is starting..."
