@@ -14,7 +14,7 @@ services:
     image: redis:7-alpine
 
   web:
-    build: .  # вместо image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
+    image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - static_volume:/app/staticfiles
