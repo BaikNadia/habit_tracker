@@ -55,7 +55,7 @@ jobs:
 
   build:
     name: 🐳 Build Docker Image
-    if: github.event_name == 'push'
+
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -78,7 +78,7 @@ jobs:
 
   deploy:
     name: 🚀 Deploy to Server
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
