@@ -77,38 +77,35 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
 
   deploy:
-    name: 🚀 Deploy to Server
-
     runs-on: ubuntu-latest
+    needs: test
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Deploy to YandexCloud VM
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY  }}
+          script: |
+            cd /home/${{ secrets.SSH_USER }}/habit_tracker || mkdir -p /home/${{ secrets.SSH_USER }}/habit_tracker && cd /home/${{ secrets.SSH_USER  }}/habit_tracker
+            cat << 'EOF' > .env
+            SECRET_KEY=${{ secrets. }}
+            DB_NAME=${{ secrets. }}
+            DB_USER=${{ secrets. }}
+            DB_PASSWORD=${{ secrets. }}
+            DB_HOST=${{ secrets. }}
+            DB_PORT=${{ secrets. }}
+            
+            ОСТАЛЬНЫЕ ПЕРЕМЕННЫЕ ЕСЛИ НУЖНО
 
-      - name: Create .env on server
-        run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "
-            mkdir -p /home/${{ secrets.SSH_USER }}/habit_tracker
-            cd /home/${{ secrets.SSH_USER }}/habit_tracker
-            echo 'SECRET_KEY=${{ secrets.SECRET_KEY }}' > .env
-            echo 'DEBUG=False' >> .env
-            echo 'ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1,0.0.0.0' >> .env
-            # ИЗМЕНИТЕ ЭТИ СТРОКИ НА DB_ ПРЕФИКС:
-            echo 'DB_NAME=${{ secrets.DB_NAME }}' >> .env
-            echo 'DB_USER=${{ secrets.DB_USER }}' >> .env
-            echo 'DB_PASSWORD=${{ secrets.DB_PASSWORD }}' >> .env
-            echo 'DB_HOST=db' >> .env
-            echo 'DB_PORT=5432' >> .env
-            echo 'CELERY_BROKER_URL=redis://redis:6379/0' >> .env
-            echo 'CELERY_RESULT_BACKEND=redis://redis:6379/0' >> .env
-            echo 'TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}' >> .env
-            echo 'DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}' >> .env
-            echo 'GIT_COMMIT=${{ github.sha }}' >> .env
-          "
+            EOF
+            
+            # Останавливаем старые контейнеры, если они есть
+            sudo docker compose down || true
+            # Подтягиваем свежий код
+            git pull origin feature/task-7 || git clone -b origin feature/task-7 git@github.com:${{ github.repository }}.git .
+            # Собираем и запускаем контейнеры
+            sudo docker compose up -d --build
 
       - name: Copy docker-compose.yml
         run: |
