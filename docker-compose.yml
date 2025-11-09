@@ -4,8 +4,7 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
-      # - "443:443"  # раскомментируйте для HTTPS
+      - "8080:80"  # используем порт 8080 чтобы не конфликтовать с google_gu
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
       - static_volume:/app/staticfiles
@@ -13,11 +12,9 @@ services:
     depends_on:
       - web
     restart: unless-stopped
-    networks:
-      - habit_network
 
   db:
-    image: postgres:15-alpine
+    image: postgres:15
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
@@ -26,13 +23,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
     env_file:
       - .env
-    networks:
-      - habit_network
 
   redis:
     image: redis:7-alpine
-    networks:
-      - habit_network
 
   web:
     image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
@@ -41,24 +34,14 @@ services:
       - static_volume:/app/staticfiles
       - media_volume:/app/mediafiles
     environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - DEBUG=${DEBUG}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db  # используем имя сервиса
-      - DB_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DEBUG=True
+    env_file:
+      - .env
     expose:
-      - "8000"  # только для внутренней сети
+      - "8000"  # меняем ports на expose для внутреннего использования
     depends_on:
       - db
       - redis
-    networks:
-      - habit_network
 
   celery:
     image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
@@ -71,8 +54,6 @@ services:
     depends_on:
       - db
       - redis
-    networks:
-      - habit_network
 
   celery_beat:
     image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
@@ -85,14 +66,8 @@ services:
     depends_on:
       - db
       - redis
-    networks:
-      - habit_network
 
 volumes:
   postgres_data:
   static_volume:
   media_volume:
-
-networks:
-  habit_network:
-    driver: bridge
