@@ -1,26 +1,22 @@
-name: Deploy Habit Tracker
+name: Django CI
 
-on:
-  push:
-    branches: [ main, develop, feature/task-7 ]
-  pull_request:
-    branches: [ main, develop ]
+on: [push, pull_request]
 
 env:
-  GITHUB_ACTIONS: true
+     SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+     ANOTHER_VAR: value
 
 jobs:
   lint:
-    name: 🔍 Code Quality Check
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.13"
 
       - name: Install flake8
         run: |
@@ -30,94 +26,93 @@ jobs:
       - name: Run flake8
         run: flake8 .
 
+
   test:
-    name: 🧪 Run Tests
+    needs: lint
     runs-on: ubuntu-latest
+
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+    - name: Check out code
+      uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.13"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install poetry
+        poetry config virtualenvs.create false
+        poetry install --no-root
 
-      - name: Run tests
-        run: |
-          export SECRET_KEY="test-key"
-          export DEBUG=True
-          python manage.py test
+    - name: Run tests
+      run: python manage.py test
+
 
   build:
-    name: 🐳 Build Docker Image
+    needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: echo "${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:${{ github.sha }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/habit-tracker:latest
+      - name: Build Docker image
+        run: docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/online_work:${{ github.sha }} .
+
+      - name: Push Docker image to Docker Hub
+        run: docker push ${{ secrets.DOCKER_HUB_USERNAME }}/online_work:${{ github.sha }}
 
   deploy:
-    name: 🚀 Deploy to Server
+    needs: build
     runs-on: ubuntu-latest
-    needs: test
+
     steps:
-      - name: Deploy to YandexCloud VM
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /home/${{ secrets.SSH_USER }}/habit_tracker || mkdir -p /home/${{ secrets.SSH_USER }}/habit_tracker && cd /home/${{ secrets.SSH_USER }}/habit_tracker
-
-            # Создаем .env файл
-            cat << 'EOF' > .env
-            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            # Создаем папку если нет
+            mkdir -p ~/myproject
+            
+            # Добавляем пользователя в группу docker (если еще не добавлен)
+            sudo usermod -aG docker $USER 2>/dev/null || true
+            
+            # Останавливаем и удаляем контейнер
+            sudo docker stop online_work || true
+            sudo docker rm online_work || true
+            
+            # Создаем/обновляем .env файл с переменными из GitHub Secrets
+            cat > ~/myproject/.env << EOF
+            SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
             DEBUG=False
-            ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1,0.0.0.0
-            DB_NAME=${{ secrets.DB_NAME }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_HOST=db
-            DB_PORT=5432
-            CELERY_BROKER_URL=redis://redis:6379/0
-            CELERY_RESULT_BACKEND=redis://redis:6379/0
-            TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-            DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+            ALLOWED_HOSTS=${{ secrets.SERVER_IP }},localhost,127.0.0.1
+            
+            # Database
+            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
+            POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}
+            DATABASE_URL=postgres://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@${{ secrets.POSTGRES_HOST }}:${{ secrets.POSTGRES_PORT }}/${{ secrets.POSTGRES_DB }}
+            
+            # Telegram Bot
+            BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+            
+            # Celery
+            CELERY_BROKER_URL=${{ secrets.CELERY_BROKER_URL }}
+            CELERY_RESULT_BACKEND=${{ secrets.CELERY_RESULT_BACKEND }}
             EOF
-
-            # Останавливаем старые контейнеры, если они есть
-            sudo docker compose down || true
-
-            # Подтягиваем свежий код ИЗ ВЕТКИ DEVELOP
-            git pull origin develop || git clone -b develop git@github.com:${{ github.repository }}.git .
-
-            # Собираем и запускаем контейнеры
-            sudo docker compose up -d --build
-
-            # Ждем запуска и выполняем миграции
-            sleep 30
-            sudo docker compose exec web python manage.py migrate
-            sudo docker compose exec web python manage.py collectstatic --noinput
-
-            echo "🚀 Deployment completed successfully!"
+            
+            # Запускаем новый контейнер
+            sudo docker run -d --name online_work -p 80:8000 \
+              --env-file ~/myproject/.env \
+              ${{ secrets.DOCKER_HUB_USERNAME }}/online_work:${{ github.sha }}
