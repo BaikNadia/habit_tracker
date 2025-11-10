@@ -1,73 +1,114 @@
-version: '3.8'
-
 services:
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "8080:80"  # используем порт 8080 чтобы не конфликтовать с google_gu
+  web:
+    build: .
+    command: sh -c "python manage.py collectstatic --noinput && gunicirn config.wsgi:application --bind 0.0.0.0:8000"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - .:/app
       - static_volume:/app/staticfiles
-      - media_volume:/app/mediafiles
+    expose:
+      - "8000"
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - ./.env
+
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - static_volume:/app/staticfiles
     depends_on:
       - web
-    restart: unless-stopped
+
 
   db:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    image: postgres:16.0
+    env_file:
+      - .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    env_file:
-      - .env
 
   redis:
-    image: redis:7-alpine
-
-  web:
-    image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
-    command: python manage.py runserver 0.0.0.0:8000
+    image: redis:7
     volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/mediafiles
-    environment:
-      - DEBUG=True
+      - redis_data:/data
     env_file:
-      - .env
-    expose:
-      - "8000"  # меняем ports на expose для внутреннего использования
-    depends_on:
-      - db
-      - redis
+      - ./.env
 
-  celery:
-    image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
-    command: celery -A config worker --loglevel=info
-    volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/mediafiles
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - redis
-
-  celery_beat:
-    image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
-    command: celery -A config beat --loglevel=info
-    volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/mediafiles
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - redis
-
-volumes:
-  postgres_data:
-  static_volume:
-  media_volume:
+#version: '3.9'
+#
+#services:
+#  nginx:
+#    image: nginx:alpine
+#    ports:
+#      - "8080:80"  # используем порт 8080 чтобы не конфликтовать с google_gu
+#    volumes:
+#      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+#      - static_volume:/app/staticfiles
+#      - media_volume:/app/mediafiles
+#    depends_on:
+#      - web
+#    restart: unless-stopped
+#
+#  db:
+#    image: postgres:15
+#    environment:
+#      POSTGRES_DB: ${DB_NAME}
+#      POSTGRES_USER: ${DB_USER}
+#      POSTGRES_PASSWORD: ${DB_PASSWORD}
+#    volumes:
+#      - postgres_data:/var/lib/postgresql/data
+#    env_file:
+#      - .env
+#
+#  redis:
+#    image: redis:7-alpine
+#
+#  web:
+#    image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
+#    command: python manage.py runserver 0.0.0.0:8000
+#    volumes:
+#      - static_volume:/app/staticfiles
+#      - media_volume:/app/mediafiles
+#    environment:
+#      - DEBUG=True
+#    env_file:
+#      - .env
+#    expose:
+#      - "8000"  # меняем ports на expose для внутреннего использования
+#    depends_on:
+#      - db
+#      - redis
+#
+#  celery:
+#    image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
+#    command: celery -A config worker --loglevel=info
+#    volumes:
+#      - static_volume:/app/staticfiles
+#      - media_volume:/app/mediafiles
+#    env_file:
+#      - .env
+#    depends_on:
+#      - db
+#      - redis
+#
+#  celery_beat:
+#    image: ${DOCKERHUB_USERNAME}/habit-tracker:${GIT_COMMIT}
+#    command: celery -A config beat --loglevel=info
+#    volumes:
+#      - static_volume:/app/staticfiles
+#      - media_volume:/app/mediafiles
+#    env_file:
+#      - .env
+#    depends_on:
+#      - db
+#      - redis
+#
+#volumes:
+#  postgres_data:
+#  static_volume:
+#  media_volume:
