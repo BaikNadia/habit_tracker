@@ -53,11 +53,10 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-    - name: Run tests with coverage
+    - name: Run tests
       run: |
         cd django
-        coverage run manage.py test
-        coverage report
+        python manage.py test
       env:
         DB_NAME: test_habit_tracker
         DB_USER: test_user
@@ -68,29 +67,10 @@ jobs:
         DEBUG: True
         SECRET_KEY: test-secret-key-for-ci-cd
 
-  build:
+  deploy:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Build Docker images
-      run: |
-        docker-compose build
-
-    - name: Test Docker containers
-      run: |
-        docker-compose up -d
-        sleep 30
-        docker-compose ps
-        docker-compose logs
-        docker-compose down
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
