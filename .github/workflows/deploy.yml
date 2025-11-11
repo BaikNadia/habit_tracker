@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-name: Deploy to Server
-=======
 name: Deploy Habit Tracker
->>>>>>> server-changes
 
 on:
   push:
@@ -11,13 +7,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-<<<<<<< HEAD
 
-    steps:
-    - uses: actions/checkout@v4
-
-=======
-    
     services:
       postgres:
         image: postgres:15
@@ -32,7 +22,7 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-      
+
       redis:
         image: redis:7-alpine
         options: >-
@@ -45,49 +35,24 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
->>>>>>> server-changes
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-<<<<<<< HEAD
 
-=======
-    
->>>>>>> server-changes
     - name: Install dependencies
       run: |
-        cd django
         pip install -r requirements.txt
-<<<<<<< HEAD
-
-    - name: Run linting
-      run: |
-        cd django
-        pip install flake8 black
-        flake8 .
-        black --check .
-
-    - name: Run tests
-      run: |
-        cd django
-        python manage.py test
-      env:
-        DATABASE_URL: sqlite:///test.db
-        DEBUG: True
-=======
         pip install flake8 pytest pytest-django coverage
-    
+
     - name: Run linting
       run: |
-        cd django
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    
+
     - name: Run tests with coverage
       run: |
-        cd django
         coverage run manage.py test
         coverage report
       env:
@@ -99,29 +64,19 @@ jobs:
         REDIS_URL: redis://localhost:6379/0
         DEBUG: True
         SECRET_KEY: test-secret-key-for-ci-cd
->>>>>>> server-changes
 
   build:
     needs: test
     runs-on: ubuntu-latest
-<<<<<<< HEAD
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Build Docker images
-      run: |
-        docker-compose build
-=======
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Build Docker images
       run: |
         docker-compose build
-    
+
     - name: Test Docker containers
       run: |
         docker-compose up -d
@@ -129,35 +84,14 @@ jobs:
         docker-compose ps
         docker-compose logs
         docker-compose down
->>>>>>> server-changes
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
-<<<<<<< HEAD
-    if: github.ref == 'refs/heads/main'
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Deploy to server
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: 84.252.141.200
-        username: baiknadia
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          cd ~/habit_tracker
-          git pull origin main
-          docker-compose -f docker-compose.yml -f docker-compose.prod.yml down
-          docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-          docker-compose exec django python manage.py migrate
-          docker-compose exec django python manage.py collectstatic --noinput
-=======
-    
-    steps:
-    - uses: actions/checkout@v4
-    
     - name: Deploy to server
       uses: appleboy/ssh-action@v1.0.3
       with:
@@ -174,4 +108,3 @@ jobs:
           docker-compose exec web python manage.py collectstatic --noinput
           docker-compose ps
           echo "Deployment completed successfully!"
->>>>>>> server-changes
