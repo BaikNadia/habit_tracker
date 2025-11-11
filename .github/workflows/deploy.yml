@@ -43,16 +43,19 @@ jobs:
 
     - name: Install dependencies
       run: |
+        cd django
         pip install -r requirements.txt
-        pip install flake8 pytest pytest-django coverage
+        pip install flake8 coverage
 
     - name: Run linting
       run: |
+        cd django
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Run tests with coverage
       run: |
+        cd django
         coverage run manage.py test
         coverage report
       env:
@@ -95,8 +98,8 @@ jobs:
     - name: Deploy to server
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: 84.252.141.200
-        username: baiknadia
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USERNAME }}
         key: ${{ secrets.SERVER_SSH_KEY }}
         script: |
           cd ~/habit_tracker
