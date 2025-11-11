@@ -1,0 +1,13 @@
+.git
+.gitignore
+README.md
+.env
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+htmlcov/
+.coverage
+.coverage.*

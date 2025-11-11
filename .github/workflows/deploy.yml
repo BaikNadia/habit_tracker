@@ -1,0 +1,70 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        cd django
+        pip install -r requirements.txt
+
+    - name: Run linting
+      run: |
+        cd django
+        pip install flake8 black
+        flake8 .
+        black --check .
+
+    - name: Run tests
+      run: |
+        cd django
+        python manage.py test
+      env:
+        DATABASE_URL: sqlite:///test.db
+        DEBUG: True
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build Docker images
+      run: |
+        docker-compose build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: 84.252.141.200
+        username: baiknadia
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd ~/habit_tracker
+          git pull origin main
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml down
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+          docker-compose exec django python manage.py migrate
+          docker-compose exec django python manage.py collectstatic --noinput
