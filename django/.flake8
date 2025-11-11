@@ -1,0 +1,12 @@
+[flake8]
+max-line-length = 119
+exclude =
+    .venv,
+    */migrations/*,
+    */__pycache__/*,
+    manage.py,
+    */apps.py,
+    */admin.py,
+    */tests.py,
+    */wsgi.py,
+    */asgi.py

@@ -1,0 +1,113 @@
+name: Deploy Habit Tracker
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_habit_tracker
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd django
+        pip install -r requirements.txt
+        pip install flake8 pytest pytest-django coverage
+    
+    - name: Run linting
+      run: |
+        cd django
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Run tests with coverage
+      run: |
+        cd django
+        coverage run manage.py test
+        coverage report
+      env:
+        DB_NAME: test_habit_tracker
+        DB_USER: test_user
+        DB_PASSWORD: test_password
+        DB_HOST: localhost
+        DB_PORT: 5432
+        REDIS_URL: redis://localhost:6379/0
+        DEBUG: True
+        SECRET_KEY: test-secret-key-for-ci-cd
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docker images
+      run: |
+        docker-compose build
+    
+    - name: Test Docker containers
+      run: |
+        docker-compose up -d
+        sleep 30
+        docker-compose ps
+        docker-compose logs
+        docker-compose down
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: 84.252.141.200
+        username: baiknadia
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        script: |
+          cd ~/habit_tracker
+          git pull origin main
+          docker-compose down
+          docker-compose up -d --build
+          sleep 30
+          docker-compose exec web python manage.py migrate --noinput
+          docker-compose exec web python manage.py collectstatic --noinput
+          docker-compose ps
+          echo "Deployment completed successfully!"
