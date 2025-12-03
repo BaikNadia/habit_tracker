@@ -1,6 +1,25 @@
 # 🧘‍♀️ Habit Tracker — Трекер полезных привычек
 
-Habit Tracker — это REST API на Django для создания, отслеживания и получения напоминаний о полезных привычках через Telegram.
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Django](https://img.shields.io/badge/Django-4.2%2B-green?logo=django&logoColor=white)](https://www.djangoproject.com/)
+[![Django REST](https://img.shields.io/badge/Django%20REST%20Framework-3.14%2B-red?logo=django&logoColor=white)](https://www.django-rest-framework.org/)
+[![Celery](https://img.shields.io/badge/Celery-5.3%2B-green?logo=celery&logoColor=white)](https://docs.celeryq.dev/)
+[![Redis](https://img.shields.io/badge/Redis-7.2%2B-red?logo=redis&logoColor=white)](https://redis.io/)
+[![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue?logo=telegram&logoColor=white)](https://core.telegram.org/bots)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey?logo=creativecommons&logoColor=white)](https://creativecommons.org/licenses/by/4.0/)
+[![GitHub Stars](https://img.shields.io/github/stars/BaikNadia/habit-tracker?style=social)](https://github.com/BaikNadia/habit-tracker)
+
+**REST API на Django для создания, отслеживания и получения напоминаний о полезных привычках через Telegram**  
+Полноценная система для формирования полезных привычек с автоматическими напоминаниями и аналитикой прогресса.
+
+---
+
+**👩‍💻 Автор:** [BaikNadia](https://github.com/BaikNadia)  
+**📦 Репозиторий:** [Habit Tracker](https://github.com/BaikNadia/habit-tracker)  
+**📜 Лицензия:** [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/)
+
+---
 
 ## 📌 Основные возможности
 📝 Создание, редактирование и удаление привычек  
